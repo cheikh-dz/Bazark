@@ -695,127 +695,84 @@
 
 <script>
 // ============ إعدادات GitHub ============
-// ⚠️ غير هذه القيم بمعلومات مستودعك:
-const GITHUB_TOKEN = ''; // ضع توكن GitHub الشخصي هنا
-const GITHUB_OWNER = 'USERNAME'; // اسم المستخدم
-const GITHUB_REPO = 'REPO-NAME'; // اسم المستودع
-const GITHUB_BRANCH = 'main'; // الفرع
-
-// الروابط المباشرة لملف JSON وصور المنتجات
+const GITHUB_TOKEN = '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';
+const GITHUB_OWNER = 'cheikh-dz';
+const GITHUB_REPO = 'Bazark';
+const GITHUB_BRANCH = 'main';
 const PRODUCTS_URL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/data/products.json`;
-const IMAGES_PATH = 'images/products'; // المجلد داخل المستودع
+const IMAGES_PATH = 'images/products';
+const API_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/products.json`;
 
-// ============ تخزين محلي احتياطي ============
+// ============ تخزين محلي ============
 const STORAGE_KEY = 'bazarak_products';
+function getLocalProducts() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } }
+function saveLocalProducts(p) { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); }
 
-function getLocalProducts() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
-}
-function saveLocalProducts(products) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
-}
-
-// ============ تحميل المنتجات من GitHub ============
+// ============ تحميل من GitHub ============
 async function fetchFromGitHub() {
   try {
     const res = await fetch(PRODUCTS_URL);
-    if (!res.ok) throw new Error('File not found');
+    if (!res.ok) throw new Error('Not found');
     return await res.json();
   } catch (e) {
-    console.log('⚠️ تعذر التحميل من GitHub، استخدام التخزين المحلي');
     return null;
   }
 }
 
-// ============ رفع المنتجات إلى GitHub ============
+// ============ حفظ على GitHub ============
 async function saveToGitHub(products) {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === '') {
-    console.log('ℹ️ لم يتم تعيين توكن GitHub، الحفظ محلياً فقط');
-    saveLocalProducts(products);
-    return true;
-  }
-
-  const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/products.json`;
-
+  saveLocalProducts(products);
+  
+  let sha = null;
   try {
-    // الحصول على sha الملف الحالي إن وجد
-    let sha = null;
-    try {
-      const getRes = await fetch(apiUrl, {
-        headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
-      });
-      if (getRes.ok) {
-        const fileData = await getRes.json();
-        sha = fileData.sha;
-      }
-    } catch (e) {}
+    const getRes = await fetch(API_URL, { headers: { Authorization: `token ${GITHUB_TOKEN}` } });
+    if (getRes.ok) { const d = await getRes.json(); sha = d.sha; }
+  } catch (e) {}
 
-    const body = {
-      message: `تحديث المنتجات - ${new Date().toLocaleString('ar-DZ')}`,
-      content: btoa(unescape(encodeURIComponent(JSON.stringify(products, null, 2)))),
-      branch: GITHUB_BRANCH
-    };
-    if (sha) body.sha = sha;
+  const body = {
+    message: `تحديث المنتجات - ${new Date().toLocaleString('ar-DZ')}`,
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(products, null, 2)))),
+    branch: GITHUB_BRANCH
+  };
+  if (sha) body.sha = sha;
 
-    const putRes = await fetch(apiUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `token ${GITHUB_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
+  const putRes = await fetch(API_URL, {
+    method: 'PUT',
+    headers: { Authorization: `token ${GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
 
-    if (!putRes.ok) throw new Error('GitHub API error');
+  if (!putRes.ok) {
+    console.error('GitHub save failed:', await putRes.json());
+    showToast('⚠️ تم الحفظ محلياً فقط');
+  } else {
     console.log('✅ تم الحفظ على GitHub');
-    saveLocalProducts(products);
-    return true;
-  } catch (e) {
-    console.error('❌ فشل الحفظ على GitHub:', e);
-    saveLocalProducts(products);
-    return false;
   }
 }
 
-// ============ رفع صورة إلى GitHub ============
+// ============ رفع صورة ============
 async function uploadImageToGitHub(file) {
-  if (!GITHUB_TOKEN || GITHUB_TOKEN === '') {
-    // بدون توكن: تحويل الصورة إلى base64
-    return new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
-    });
-  }
+  const ext = file.name.split('.').pop();
+  const fileName = `${Date.now()}-${Math.random().toString(36).substr(2,9)}.${ext}`;
+  const imgApiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${IMAGES_PATH}/${fileName}`;
 
-  const fileName = `${Date.now()}-${Math.random().toString(36).substr(2,9)}.${file.name.split('.').pop()}`;
-  const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${IMAGES_PATH}/${fileName}`;
-
-  return new Promise((resolve, reject) => {
+  return new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
       try {
-        const base64Content = reader.result.split(',')[1];
-        const body = {
-          message: `رفع صورة ${fileName}`,
-          content: base64Content,
-          branch: GITHUB_BRANCH
-        };
-
-        const res = await fetch(apiUrl, {
+        const res = await fetch(imgApiUrl, {
           method: 'PUT',
-          headers: {
-            'Authorization': `token ${GITHUB_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(body)
+          headers: { Authorization: `token ${GITHUB_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `رفع ${fileName}`, content: base64, branch: GITHUB_BRANCH })
         });
-
-        if (!res.ok) throw new Error('Upload failed');
-        const data = await res.json();
-        resolve(data.content.download_url);
+        if (res.ok) {
+          const data = await res.json();
+          resolve(data.content.download_url);
+        } else {
+          resolve(reader.result); // base64 fallback
+        }
       } catch (e) {
-        // فشل GitHub: الرجوع لـ base64
         resolve(reader.result);
       }
     };
@@ -824,7 +781,7 @@ async function uploadImageToGitHub(file) {
   });
 }
 
-// ============ الحالة العامة ============
+// ============ الحالة ============
 let currentStep = 1;
 let activeFilter = 'الكل';
 let allProducts = [];
@@ -844,409 +801,211 @@ function navigate(page) {
   const navBtn = document.getElementById('nav-' + page);
   if (navBtn && !navBtn.classList.contains('soon')) navBtn.classList.add('active');
 
-  const fab = document.getElementById('fabBtn');
-  fab.style.display = (page === 'home' || page === 'account') ? 'flex' : 'none';
-
+  document.getElementById('fabBtn').style.display = (page === 'home' || page === 'account') ? 'flex' : 'none';
   if (page === 'home') loadHomeProducts();
   else if (page === 'account') loadMyProducts();
 }
 
-// ============ Toast ============
 function showToast(msg) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
+  t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// ============ تحميل المنتجات ============
 async function loadAllProducts() {
   let products = await fetchFromGitHub();
-  if (!products || products.length === 0) {
-    products = getLocalProducts();
-  } else {
-    saveLocalProducts(products);
-  }
+  if (!products) products = getLocalProducts();
+  else saveLocalProducts(products);
   allProducts = products;
   return products;
 }
 
 async function loadHomeProducts() {
   const grid = document.getElementById('homeGrid');
-  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">⏳</div><p>جاري تحميل المنتجات...</p></div>';
-
+  grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">⏳</div><p>جاري التحميل...</p></div>';
   const products = await loadAllProducts();
   const filtered = products.filter(p => p.status === 'active' && (activeFilter === 'الكل' || p.category === activeFilter));
-
   document.getElementById('stat-products').textContent = filtered.length;
-  if (filtered.length === 0) {
-    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">📦</div><p>لا توجد منتجات بعد. كن أول من يعرض!</p></div>';
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><div class="icon">📦</div><p>لا توجد منتجات بعد</p></div>';
     return;
   }
-  renderProductCards(filtered, grid);
-}
-
-function renderProductCards(products, grid) {
-  grid.innerHTML = products.map(p => {
-    const img = (p.images && p.images.length) ? `<img src="${p.images[0]}" alt="" onerror="this.parentElement.innerHTML='📦'">` : '📦';
-    const badge = p.listing_type === 'للبيع' ? '💰 للبيع' : '🔄 للتبادل';
-    let priceHtml = '';
-    if (p.listing_type === 'للبيع') {
-      if (p.currency_type === 'DA' || p.currency_type === 'BOTH') priceHtml += p.price_da ? `${p.price_da} DA` : '';
-      if (p.currency_type === 'USD' || p.currency_type === 'BOTH') {
-        if (priceHtml) priceHtml += ' / ';
-        priceHtml += p.price_usd ? `$${p.price_usd}` : '';
-      }
-      if (!priceHtml) priceHtml = 'غير محدد';
-    } else {
-      priceHtml = '<span style="color:var(--neon-purple)">للتبادل</span>';
-    }
-    const icon = p.category === 'FF' ? '⚽' : p.category === 'PES' ? '🎮' : '✨';
-    return `
-      <div class="product-card" onclick="contactSeller('${p.id}')">
-        <div class="product-badge">${badge}</div>
-        <div class="product-img">${img}</div>
-        <div class="product-body">
-          <div class="product-title">${icon} ${p.name}</div>
-          <div class="product-desc">${p.category} • ${(p.payment_methods||[]).join(', ') || 'غير محدد'}</div>
-          <div class="product-footer">
-            <div class="product-price">${priceHtml}</div>
-            <div class="product-seller"><span class="seller-dot"></span> ${p.seller_name}</div>
-          </div>
-          <button class="btn-contact" style="width:100%;margin-top:10px" onclick="event.stopPropagation();contactSeller('${p.id}')">📞 تواصل مع البائع</button>
-        </div>
-      </div>`;
+  grid.innerHTML = filtered.map(p => {
+    const img = (p.images&&p.images.length) ? `<img src="${p.images[0]}" onerror="this.parentElement.innerHTML='📦'">` : '📦';
+    const badge = p.listing_type==='للبيع' ? '💰 للبيع' : '🔄 للتبادل';
+    let price = '';
+    if(p.listing_type==='للبيع'){
+      if(p.currency_type==='DA'||p.currency_type==='BOTH') price += p.price_da ? `${p.price_da} DA` : '';
+      if(p.currency_type==='USD'||p.currency_type==='BOTH'){ if(price) price+=' / '; price += p.price_usd ? `$${p.price_usd}` : ''; }
+      if(!price) price = 'غير محدد';
+    } else { price = '<span style="color:var(--neon-purple)">للتبادل</span>'; }
+    const icon = p.category==='FF'?'⚽':p.category==='PES'?'🎮':'✨';
+    return `<div class="product-card" onclick="contactSeller('${p.id}')"><div class="product-badge">${badge}</div><div class="product-img">${img}</div><div class="product-body"><div class="product-title">${icon} ${p.name}</div><div class="product-desc">${p.category} • ${(p.payment_methods||[]).join(', ')||'غير محدد'}</div><div class="product-footer"><div class="product-price">${price}</div><div class="product-seller"><span class="seller-dot"></span> ${p.seller_name}</div></div><button class="btn-contact" style="width:100%;margin-top:10px" onclick="event.stopPropagation();contactSeller('${p.id}')">📞 تواصل</button></div></div>`;
   }).join('');
 }
 
 function filterCat(btn, cat) {
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  activeFilter = cat;
-  loadHomeProducts();
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); activeFilter = cat; loadHomeProducts();
 }
-
 function filterProducts() {
   const term = document.getElementById('searchInput').value.toLowerCase();
   document.querySelectorAll('#homeGrid .product-card').forEach(card => {
-    const title = card.querySelector('.product-title')?.textContent?.toLowerCase() || '';
-    card.style.display = title.includes(term) ? '' : 'none';
+    card.style.display = (card.querySelector('.product-title')?.textContent?.toLowerCase()||'').includes(term) ? '' : 'none';
   });
 }
 
-// ============ منتجاتي ============
 async function loadMyProducts() {
   const grid = document.getElementById('myGrid');
-  grid.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>جاري تحميل منتجاتك...</p></div>';
-
+  grid.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>جاري التحميل...</p></div>';
   const products = await loadAllProducts();
-  const myProducts = products.filter(p => p.seller_name === 'محمد أمين');
-
-  document.getElementById('my-count').textContent = myProducts.length;
-  if (myProducts.length === 0) {
-    grid.innerHTML = '<div class="empty-state"><div class="icon">🛍️</div><p>لم تنشر أي منتج بعد</p></div>';
-    return;
-  }
-
-  grid.innerHTML = myProducts.map(p => {
-    const img = (p.images && p.images.length) ? `<img src="${p.images[0]}" style="width:100%;height:100%;object-fit:cover">` : '📦';
-    let priceHtml = '';
-    if (p.listing_type === 'للبيع') {
-      if (p.currency_type === 'DA' || p.currency_type === 'BOTH') priceHtml += p.price_da ? `${p.price_da} DA` : '';
-      if (p.currency_type === 'USD' || p.currency_type === 'BOTH') {
-        if (priceHtml) priceHtml += ' / ';
-        priceHtml += p.price_usd ? `$${p.price_usd}` : '';
-      }
-      if (!priceHtml) priceHtml = 'غير محدد';
-    } else {
-      priceHtml = '🔄 للتبادل';
-    }
-    return `
-      <div class="my-product-card">
-        <div class="my-product-img">${img}</div>
-        <div class="my-product-body">
-          <div class="my-product-title">${p.name}</div>
-          <div class="my-product-price">${priceHtml}</div>
-          <div class="product-actions">
-            <button class="btn-edit" onclick="editProduct('${p.id}')">✏️ تعديل</button>
-            <button class="btn-del" onclick="deleteProduct('${p.id}')">🗑️ حذف</button>
-          </div>
-        </div>
-      </div>`;
+  const mine = products.filter(p=>p.seller_name==='محمد أمين');
+  document.getElementById('my-count').textContent = mine.length;
+  if(!mine.length){ grid.innerHTML = '<div class="empty-state"><div class="icon">🛍️</div><p>لا توجد منتجات</p></div>'; return; }
+  grid.innerHTML = mine.map(p => {
+    const img = (p.images&&p.images.length) ? `<img src="${p.images[0]}" style="width:100%;height:100%;object-fit:cover">` : '📦';
+    let price = '';
+    if(p.listing_type==='للبيع'){
+      if(p.currency_type==='DA'||p.currency_type==='BOTH') price += p.price_da ? `${p.price_da} DA` : '';
+      if(p.currency_type==='USD'||p.currency_type==='BOTH'){ if(price) price+=' / '; price += p.price_usd ? `$${p.price_usd}` : ''; }
+      if(!price) price = 'غير محدد';
+    } else { price = '🔄 للتبادل'; }
+    return `<div class="my-product-card"><div class="my-product-img">${img}</div><div class="my-product-body"><div class="my-product-title">${p.name}</div><div class="my-product-price">${price}</div><div class="product-actions"><button class="btn-edit" onclick="editProduct('${p.id}')">✏️ تعديل</button><button class="btn-del" onclick="deleteProduct('${p.id}')">🗑️ حذف</button></div></div></div>`;
   }).join('');
 }
 
 async function deleteProduct(id) {
-  if (!confirm('متأكد من حذف هذا المنتج؟')) return;
+  if(!confirm('متأكد من الحذف؟')) return;
   const products = await loadAllProducts();
-  const updated = products.filter(p => p.id !== id);
-  await saveToGitHub(updated);
-  showToast('✅ تم حذف المنتج بنجاح');
-  loadHomeProducts();
-  loadMyProducts();
+  await saveToGitHub(products.filter(p=>p.id!==id));
+  showToast('✅ تم الحذف');
+  loadHomeProducts(); loadMyProducts();
 }
-
-function editProduct(id) { showToast('✏️ ميزة التعديل قادمة قريباً'); }
-function contactSeller(id) { showToast('📞 سيتم فتح التواصل مع البائع قريباً'); }
-function goToAdmin() {
-  if (GITHUB_TOKEN === '' || GITHUB_TOKEN === '') {
-    showToast('⚙️ عيّن توكن GitHub في الكود أولاً لتفعيل الحفظ على المستودع');
-  } else {
-    showToast('⚙️ لوحة التحكم قيد التطوير');
-  }
-}
+function editProduct(id){ showToast('✏️ قيد التطوير'); }
+function contactSeller(id){ showToast('📞 جاري التواصل'); }
+function goToAdmin(){ showToast('⚙️ قيد التطوير'); }
 
 // ============ المعالج ============
-function openWizard() {
+function openWizard(){
   document.getElementById('wizardOverlay').classList.add('open');
-  currentStep = 1;
-  wizardData = { name: '', category: '', listingType: '', paymentMethods: [],
-    currencyType: 'DA', priceDA: '', priceUSD: '', tradeTerms: '', brokers: [], imageFiles: [] };
-  document.getElementById('wz-name').value = '';
-  document.getElementById('wz-price-da').value = '';
-  document.querySelectorAll('.option-card,.multi-card').forEach(c => c.classList.remove('selected'));
-  document.getElementById('imagePreviewGrid').innerHTML = '';
-  document.getElementById('imageCount').innerHTML = 'تم رفع <strong>0</strong> / 5 صور';
-  document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('active'));
+  currentStep=1; wizardData={name:'',category:'',listingType:'',paymentMethods:[],currencyType:'DA',priceDA:'',priceUSD:'',tradeTerms:'',brokers:[],imageFiles:[]};
+  document.getElementById('wz-name').value=''; document.getElementById('wz-price-da').value='';
+  document.querySelectorAll('.option-card,.multi-card').forEach(c=>c.classList.remove('selected'));
+  document.getElementById('imagePreviewGrid').innerHTML='';
+  document.getElementById('imageCount').innerHTML='تم رفع <strong>0</strong> / 5 صور';
+  document.querySelectorAll('.currency-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('btn-da').classList.add('active');
-  updatePriceInputs('DA');
-  showStep(1);
+  updatePriceInputs('DA'); showStep(1);
 }
+function closeWizard(){ document.getElementById('wizardOverlay').classList.remove('open'); }
 
-function closeWizard() { document.getElementById('wizardOverlay').classList.remove('open'); }
+function showStep(step){
+  document.querySelectorAll('.wizard-step').forEach(s=>s.classList.remove('active'));
+  const el=document.querySelector(`.wizard-step[data-step="${step}"]`);
+  if(el) el.classList.add('active');
+  document.getElementById('btnBack').style.display=step===1?'none':'';
+  document.getElementById('btnNext').textContent=step===7?'📤 نشر المنتج':'التالي →';
+  updateProgress(step); if(step===7) buildSummary(); currentStep=step;
+}
+function updateProgress(step){
+  document.querySelectorAll('.progress-dot').forEach((d,i)=>{ d.classList.remove('active','completed'); if(i+1<step) d.classList.add('completed'); else if(i+1===step) d.classList.add('active'); });
+  document.querySelectorAll('.progress-step-line').forEach((l,i)=>{ l.classList.remove('active','completed'); if(i+1<step) l.classList.add('completed'); else if(i+1===step) l.classList.add('active'); });
+}
+function nextStep(){ if(!validateStep(currentStep)) return; if(currentStep===7){publishProduct();return;} const n=getNextStep(); if(n) showStep(n); }
+function prevStep(){ if(currentStep<=1) return; const p=getPrevStep(); if(p) showStep(p); }
+function getNextStep(){ const m={1:2,2:3,3:wizardData.listingType==='للبيع'?'4a':'4b','4a':'5a','4b':'5b','5a':6,'5b':6,6:7}; return m[currentStep]||null; }
+function getPrevStep(){ const m={2:1,3:2,'4a':3,'4b':3,'5a':'4a','5b':'4b',6:wizardData.listingType==='للبيع'?'5a':'5b',7:6}; return m[currentStep]||null; }
 
-function showStep(step) {
-  document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
-  const el = document.querySelector(`.wizard-step[data-step="${step}"]`);
-  if (el) el.classList.add('active');
-  document.getElementById('btnBack').style.display = step === 1 ? 'none' : '';
-  document.getElementById('btnNext').textContent = step === 7 ? '📤 نشر المنتج' : 'التالي →';
-  updateProgress(step);
-  if (step === 7) buildSummary();
-  currentStep = step;
-}
-
-function updateProgress(step) {
-  document.querySelectorAll('.progress-dot').forEach((d,i) => {
-    d.classList.remove('active','completed');
-    if (i+1 < step) d.classList.add('completed');
-    else if (i+1 === step) d.classList.add('active');
-  });
-  document.querySelectorAll('.progress-step-line').forEach((l,i) => {
-    l.classList.remove('active','completed');
-    if (i+1 < step) l.classList.add('completed');
-    else if (i+1 === step) l.classList.add('active');
-  });
-}
-
-function nextStep() {
-  if (!validateStep(currentStep)) return;
-  if (currentStep === 7) { publishProduct(); return; }
-  const next = getNextStep();
-  if (next) showStep(next);
-}
-function prevStep() {
-  if (currentStep <= 1) return;
-  const prev = getPrevStep();
-  if (prev) showStep(prev);
-}
-
-function getNextStep() {
-  const map = { 1:2, 2:3, 3: wizardData.listingType==='للبيع' ? '4a':'4b',
-    '4a':'5a', '4b':'5b', '5a':6, '5b':6, 6:7 };
-  return map[currentStep] || null;
-}
-function getPrevStep() {
-  const map = { 2:1, 3:2, '4a':3, '4b':3,
-    '5a':'4a', '5b':'4b', 6: wizardData.listingType==='للبيع'?'5a':'5b', 7:6 };
-  return map[currentStep] || null;
-}
-
-function validateStep(step) {
-  if (step === 1) { wizardData.name = document.getElementById('wz-name').value.trim(); if(!wizardData.name){showToast('⚠️ أدخل اسم المنتج'); return false;} }
-  if (step === 2) { if(!wizardData.category){showToast('⚠️ اختر تصنيف المنتج'); return false;} }
-  if (step === 3) { if(!wizardData.listingType){showToast('⚠️ اختر صيغة المنتج'); return false;} }
-  if (step === '4a') {
-    if(wizardData.paymentMethods.length===0){showToast('⚠️ اختر طريقة دفع واحدة على الأقل'); return false;}
-    wizardData.priceDA = document.getElementById('wz-price-da')?.value || '';
-    wizardData.priceUSD = document.getElementById('wz-price-usd')?.value || '';
-    const hasDA = wizardData.currencyType==='DA'||wizardData.currencyType==='BOTH';
-    const hasUSD = wizardData.currencyType==='USD'||wizardData.currencyType==='BOTH';
-    if(hasDA && !wizardData.priceDA && hasUSD && !wizardData.priceUSD){showToast('⚠️ أدخل السعر'); return false;}
+function validateStep(step){
+  if(step===1){ wizardData.name=document.getElementById('wz-name').value.trim(); if(!wizardData.name){showToast('⚠️ أدخل اسم المنتج');return false;} }
+  if(step===2){ if(!wizardData.category){showToast('⚠️ اختر التصنيف');return false;} }
+  if(step===3){ if(!wizardData.listingType){showToast('⚠️ اختر الصيغة');return false;} }
+  if(step==='4a'){
+    if(!wizardData.paymentMethods.length){showToast('⚠️ اختر طريقة دفع');return false;}
+    wizardData.priceDA=document.getElementById('wz-price-da')?.value||'';
+    wizardData.priceUSD=document.getElementById('wz-price-usd')?.value||'';
+    const hasDA=wizardData.currencyType==='DA'||wizardData.currencyType==='BOTH';
+    const hasUSD=wizardData.currencyType==='USD'||wizardData.currencyType==='BOTH';
+    if(hasDA&&!wizardData.priceDA&&hasUSD&&!wizardData.priceUSD){showToast('⚠️ أدخل السعر');return false;}
   }
-  if (step === '4b') { wizardData.tradeTerms = document.getElementById('wz-trade-terms')?.value?.trim() || ''; }
-  if (step === '5a' || step === '5b') { if(wizardData.brokers.length===0){showToast('⚠️ اختر وسيطاً واحداً على الأقل'); return false;} }
-  if (step === 6) { if(wizardData.imageFiles.length===0){showToast('⚠️ ارفع صورة واحدة على الأقل'); return false;} }
+  if(step==='4b'){ wizardData.tradeTerms=document.getElementById('wz-trade-terms')?.value?.trim()||''; }
+  if(step==='5a'||step==='5b'){ if(!wizardData.brokers.length){showToast('⚠️ اختر وسيطاً');return false;} }
+  if(step===6){ if(!wizardData.imageFiles.length){showToast('⚠️ ارفع صورة');return false;} }
   return true;
 }
 
-function selectCategory(el, cat) {
-  document.querySelectorAll('.wizard-step[data-step="2"] .option-card').forEach(c=>c.classList.remove('selected'));
-  el.classList.add('selected'); wizardData.category = cat;
-}
-function selectListingType(el, type) {
-  document.querySelectorAll('.wizard-step[data-step="3"] .option-card').forEach(c=>c.classList.remove('selected'));
-  el.classList.add('selected'); wizardData.listingType = type;
-}
-function togglePayment(el, method) {
-  el.classList.toggle('selected');
-  if(el.classList.contains('selected')) { if(!wizardData.paymentMethods.includes(method)) wizardData.paymentMethods.push(method); }
-  else { wizardData.paymentMethods = wizardData.paymentMethods.filter(m=>m!==method); }
-}
-function selectAllPayments() {
-  const all = ['Bridimob','$','فليكسي','CCP'];
-  const allSelected = all.every(m=>wizardData.paymentMethods.includes(m));
-  const cards = document.querySelectorAll('#paymentMethods .multi-card');
-  if(allSelected) { wizardData.paymentMethods = []; cards.forEach(c=>c.classList.remove('selected')); }
-  else { wizardData.paymentMethods = [...all]; cards.forEach(c=>c.classList.add('selected')); }
-}
-function toggleBroker(el, name) {
-  el.classList.toggle('selected');
-  if(el.classList.contains('selected')) { if(!wizardData.brokers.includes(name)) wizardData.brokers.push(name); }
-  else { wizardData.brokers = wizardData.brokers.filter(b=>b!==name); }
-}
-function selectAllBrokers(containerId) {
-  const all = ['Salhi Sofiyane','Ahmed Fergane','Marwan Chadadi','Ayoub Boutaiba','Houssam - CLAY'];
-  const allSelected = all.every(b=>wizardData.brokers.includes(b));
-  const cards = document.querySelectorAll(`#${containerId} .multi-card`);
-  if(allSelected) { wizardData.brokers = []; cards.forEach(c=>c.classList.remove('selected')); }
-  else { wizardData.brokers = [...all]; cards.forEach(c=>c.classList.add('selected')); }
-}
-function setCurrency(cur) {
-  wizardData.currencyType = cur;
-  document.querySelectorAll('.currency-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('btn-'+cur.toLowerCase()).classList.add('active');
-  updatePriceInputs(cur);
-}
-function updatePriceInputs(cur) {
-  const container = document.getElementById('priceInputs');
-  if(cur==='DA') container.innerHTML = `<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-da" placeholder="بالدينار" value="${wizardData.priceDA}"><span class="currency-label">DA</span></div>`;
-  else if(cur==='USD') container.innerHTML = `<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-usd" placeholder="بالدولار" value="${wizardData.priceUSD}"><span class="currency-label">$</span></div>`;
-  else container.innerHTML = `<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-da" placeholder="بالدينار" value="${wizardData.priceDA}"><span class="currency-label">DA</span></div>
-    <div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-usd" placeholder="بالدولار" value="${wizardData.priceUSD}"><span class="currency-label">$</span></div>`;
+function selectCategory(el,cat){ document.querySelectorAll('.wizard-step[data-step="2"] .option-card').forEach(c=>c.classList.remove('selected')); el.classList.add('selected'); wizardData.category=cat; }
+function selectListingType(el,type){ document.querySelectorAll('.wizard-step[data-step="3"] .option-card').forEach(c=>c.classList.remove('selected')); el.classList.add('selected'); wizardData.listingType=type; }
+function togglePayment(el,m){ el.classList.toggle('selected'); if(el.classList.contains('selected')){if(!wizardData.paymentMethods.includes(m))wizardData.paymentMethods.push(m);}else{wizardData.paymentMethods=wizardData.paymentMethods.filter(x=>x!==m);} }
+function selectAllPayments(){ const a=['Bridimob','$','فليكسي','CCP']; const s=a.every(m=>wizardData.paymentMethods.includes(m)); const c=document.querySelectorAll('#paymentMethods .multi-card'); if(s){wizardData.paymentMethods=[];c.forEach(x=>x.classList.remove('selected'));}else{wizardData.paymentMethods=[...a];c.forEach(x=>x.classList.add('selected'));} }
+function toggleBroker(el,n){ el.classList.toggle('selected'); if(el.classList.contains('selected')){if(!wizardData.brokers.includes(n))wizardData.brokers.push(n);}else{wizardData.brokers=wizardData.brokers.filter(b=>b!==n);} }
+function selectAllBrokers(id){ const a=['Salhi Sofiyane','Ahmed Fergane','Marwan Chadadi','Ayoub Boutaiba','Houssam - CLAY']; const s=a.every(b=>wizardData.brokers.includes(b)); const c=document.querySelectorAll(`#${id} .multi-card`); if(s){wizardData.brokers=[];c.forEach(x=>x.classList.remove('selected'));}else{wizardData.brokers=[...a];c.forEach(x=>x.classList.add('selected'));} }
+function setCurrency(cur){ wizardData.currencyType=cur; document.querySelectorAll('.currency-btn').forEach(b=>b.classList.remove('active')); document.getElementById('btn-'+cur.toLowerCase()).classList.add('active'); updatePriceInputs(cur); }
+function updatePriceInputs(cur){
+  const c=document.getElementById('priceInputs');
+  if(cur==='DA') c.innerHTML=`<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-da" placeholder="بالدينار" value="${wizardData.priceDA}"><span class="currency-label">DA</span></div>`;
+  else if(cur==='USD') c.innerHTML=`<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-usd" placeholder="بالدولار" value="${wizardData.priceUSD}"><span class="currency-label">$</span></div>`;
+  else c.innerHTML=`<div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-da" placeholder="بالدينار" value="${wizardData.priceDA}"><span class="currency-label">DA</span></div><div class="price-input-wrap"><input class="form-input" type="number" id="wz-price-usd" placeholder="بالدولار" value="${wizardData.priceUSD}"><span class="currency-label">$</span></div>`;
 }
 
 // ============ الصور ============
-const MAX_IMAGES = 5;
-function handleImages(input) {
-  const files = Array.from(input.files);
-  if(files.length + wizardData.imageFiles.length > MAX_IMAGES) { showToast(`❌ الحد الأقصى ${MAX_IMAGES} صور`); input.value=''; return; }
-  wizardData.imageFiles = [...wizardData.imageFiles, ...files].slice(0,MAX_IMAGES);
-  updateImagePreview();
-  input.value='';
+const MAX_IMAGES=5;
+function handleImages(input){
+  const files=Array.from(input.files);
+  if(files.length+wizardData.imageFiles.length>MAX_IMAGES){showToast(`❌ الحد الأقصى ${MAX_IMAGES}`);input.value='';return;}
+  wizardData.imageFiles=[...wizardData.imageFiles,...files].slice(0,MAX_IMAGES); updateImagePreview(); input.value='';
 }
-function updateImagePreview() {
-  const grid = document.getElementById('imagePreviewGrid');
-  grid.innerHTML = '';
-  wizardData.imageFiles.forEach((file,i)=>{
-    const reader = new FileReader();
-    const div = document.createElement('div');
-    div.className = 'image-preview';
-    reader.onload = e => { div.innerHTML = `<img src="${e.target.result}"><button class="remove-img" onclick="removeImage(${i})">✕</button>`; };
-    reader.readAsDataURL(file);
-    grid.appendChild(div);
-  });
-  for(let i=wizardData.imageFiles.length; i<MAX_IMAGES; i++) {
-    const div = document.createElement('div');
-    div.className = 'image-preview placeholder';
-    div.textContent = '+';
-    grid.appendChild(div);
-  }
-  document.getElementById('imageCount').innerHTML = `تم اختيار <strong>${wizardData.imageFiles.length}</strong> / ${MAX_IMAGES} صور`;
+function updateImagePreview(){
+  const g=document.getElementById('imagePreviewGrid'); g.innerHTML='';
+  wizardData.imageFiles.forEach((f,i)=>{ const r=new FileReader(); const d=document.createElement('div'); d.className='image-preview'; r.onload=e=>{d.innerHTML=`<img src="${e.target.result}"><button class="remove-img" onclick="removeImage(${i})">✕</button>`;}; r.readAsDataURL(f); g.appendChild(d); });
+  for(let i=wizardData.imageFiles.length;i<MAX_IMAGES;i++){ const d=document.createElement('div'); d.className='image-preview placeholder'; d.textContent='+'; g.appendChild(d); }
+  document.getElementById('imageCount').innerHTML=`تم اختيار <strong>${wizardData.imageFiles.length}</strong> / ${MAX_IMAGES} صور`;
 }
-function removeImage(index) { wizardData.imageFiles.splice(index,1); updateImagePreview(); }
+function removeImage(i){ wizardData.imageFiles.splice(i,1); updateImagePreview(); }
 
-// ============ نشر المنتج ============
-async function publishProduct() {
-  const btn = document.getElementById('btnNext');
-  btn.disabled = true;
-  btn.innerHTML = 'جاري النشر...<span class="loading-spinner"></span>';
-
-  try {
-    // رفع كل الصور
-    const imageUrls = [];
-    for (const file of wizardData.imageFiles) {
-      const url = await uploadImageToGitHub(file);
-      if (url) imageUrls.push(url);
-    }
-
-    const product = {
-      id: Date.now().toString(36) + Math.random().toString(36).substr(2,5),
-      name: wizardData.name,
-      category: wizardData.category,
-      listing_type: wizardData.listingType,
-      payment_methods: wizardData.listingType === 'للبيع' ? wizardData.paymentMethods : [],
-      price_da: wizardData.listingType === 'للبيع' && (wizardData.currencyType === 'DA' || wizardData.currencyType === 'BOTH') ? parseFloat(wizardData.priceDA) || null : null,
-      price_usd: wizardData.listingType === 'للبيع' && (wizardData.currencyType === 'USD' || wizardData.currencyType === 'BOTH') ? parseFloat(wizardData.priceUSD) || null : null,
-      currency_type: wizardData.listingType === 'للبيع' ? wizardData.currencyType : null,
-      trade_terms: wizardData.listingType === 'للتبادل' ? wizardData.tradeTerms : null,
-      brokers: wizardData.brokers,
-      images: imageUrls,
-      seller_name: 'محمد أمين',
-      seller_phone: 'غير متاح',
-      status: 'active',
-      created_at: new Date().toISOString()
+// ============ نشر ============
+async function publishProduct(){
+  const btn=document.getElementById('btnNext'); btn.disabled=true; btn.innerHTML='جاري النشر...<span class="loading-spinner"></span>';
+  try{
+    const imageUrls=[];
+    for(const f of wizardData.imageFiles){ const url=await uploadImageToGitHub(f); if(url) imageUrls.push(url); }
+    const product={
+      id:Date.now().toString(36)+Math.random().toString(36).substr(2,5),
+      name:wizardData.name, category:wizardData.category, listing_type:wizardData.listingType,
+      payment_methods:wizardData.listingType==='للبيع'?wizardData.paymentMethods:[],
+      price_da:wizardData.listingType==='للبيع'&&(wizardData.currencyType==='DA'||wizardData.currencyType==='BOTH')?parseFloat(wizardData.priceDA)||null:null,
+      price_usd:wizardData.listingType==='للبيع'&&(wizardData.currencyType==='USD'||wizardData.currencyType==='BOTH')?parseFloat(wizardData.priceUSD)||null:null,
+      currency_type:wizardData.listingType==='للبيع'?wizardData.currencyType:null,
+      trade_terms:wizardData.listingType==='للتبادل'?wizardData.tradeTerms:null,
+      brokers:wizardData.brokers, images:imageUrls,
+      seller_name:'محمد أمين', seller_phone:'غير متاح', status:'active', created_at:new Date().toISOString()
     };
-
-    const products = await loadAllProducts();
-    products.unshift(product);
-    await saveToGitHub(products);
-
-    showToast('🎉 تم نشر المنتج بنجاح!');
-    closeWizard();
-    loadHomeProducts();
-    loadMyProducts();
-  } catch(e) {
-    console.error(e);
-    showToast('❌ فشل نشر المنتج');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '📤 نشر المنتج';
-  }
+    const products=await loadAllProducts(); products.unshift(product); await saveToGitHub(products);
+    showToast('🎉 تم النشر!'); closeWizard(); loadHomeProducts(); loadMyProducts();
+  }catch(e){ console.error(e); showToast('❌ فشل النشر'); }
+  finally{ btn.disabled=false; btn.textContent='📤 نشر المنتج'; }
 }
 
-function buildSummary() {
-  const container = document.getElementById('summaryContainer');
-  let priceStr = '';
-  if(wizardData.listingType==='للبيع') {
-    if(wizardData.currencyType==='DA'||wizardData.currencyType==='BOTH') priceStr += wizardData.priceDA ? `${wizardData.priceDA} DA` : '';
-    if(wizardData.currencyType==='USD'||wizardData.currencyType==='BOTH') {
-      if(priceStr) priceStr += ' / ';
-      priceStr += wizardData.priceUSD ? `$${wizardData.priceUSD}` : '';
-    }
+function buildSummary(){
+  const c=document.getElementById('summaryContainer'); let price='';
+  if(wizardData.listingType==='للبيع'){
+    if(wizardData.currencyType==='DA'||wizardData.currencyType==='BOTH') price+=wizardData.priceDA?`${wizardData.priceDA} DA`:'';
+    if(wizardData.currencyType==='USD'||wizardData.currencyType==='BOTH'){ if(price) price+=' / '; price+=wizardData.priceUSD?`$${wizardData.priceUSD}`:''; }
   }
-  const imgs = wizardData.imageFiles.map((f,i) => `<div class="img-thumb"><img src="${URL.createObjectURL(f)}"></div>`).join('');
-  container.innerHTML = `
-    <div class="summary-card"><div class="label">اسم المنتج</div><div class="value">${wizardData.name}</div></div>
+  const imgs=wizardData.imageFiles.map((f,i)=>`<div class="img-thumb"><img src="${URL.createObjectURL(f)}"></div>`).join('');
+  c.innerHTML=`<div class="summary-card"><div class="label">الاسم</div><div class="value">${wizardData.name}</div></div>
     <div class="summary-card"><div class="label">التصنيف</div><div class="value">${wizardData.category}</div></div>
     <div class="summary-card"><div class="label">الصيغة</div><div class="value">${wizardData.listingType}</div></div>
-    ${wizardData.listingType==='للبيع'?`
-      <div class="summary-card"><div class="label">طرق الدفع</div><div class="value">${wizardData.paymentMethods.join(', ')||'لا يوجد'}</div></div>
-      <div class="summary-card"><div class="label">السعر</div><div class="value price">${priceStr||'غير محدد'}</div></div>
-    `:`
-      <div class="summary-card"><div class="label">شروط التبادل</div><div class="value">${wizardData.tradeTerms||'غير محدد'}</div></div>
-    `}
+    ${wizardData.listingType==='للبيع'?`<div class="summary-card"><div class="label">طرق الدفع</div><div class="value">${wizardData.paymentMethods.join(', ')||'لا يوجد'}</div></div><div class="summary-card"><div class="label">السعر</div><div class="value price">${price||'غير محدد'}</div></div>`:`<div class="summary-card"><div class="label">شروط التبادل</div><div class="value">${wizardData.tradeTerms||'غير محدد'}</div></div>`}
     <div class="summary-card"><div class="label">الوسطاء</div><div class="value">${wizardData.brokers.join(', ')||'لا يوجد'}</div></div>
-    <div class="summary-card"><div class="label">الصور (${wizardData.imageFiles.length})</div><div class="summary-images">${imgs||'<span style="color:var(--text-muted);">لا توجد صور</span>'}</div></div>`;
+    <div class="summary-card"><div class="label">الصور</div><div class="summary-images">${imgs||'<span>لا توجد</span>'}</div></div>`;
 }
 
-// ============ بدء التشغيل ============
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 بازارك يبدأ...');
-  document.getElementById('fabBtn').style.display = 'flex';
-  updateImagePreview();
-  loadHomeProducts();
-
-  // إنشاء مجلدات افتراضية إذا كان التوكن موجوداً
-  if (GITHUB_TOKEN && GITHUB_TOKEN !== '') {
-    console.log('✅ تم تعيين توكن GitHub - سيتم الحفظ على المستودع');
-    console.log(`📁 ملف البيانات: data/products.json`);
-    console.log(`📁 الصور: ${IMAGES_PATH}/`);
-  } else {
-    console.log('ℹ️ لم يتم تعيين توكن GitHub - سيتم الحفظ محلياً فقط');
-    console.log('ℹ️ لتوليد توكن: https://github.com/settings/tokens');
-    console.log('ℹ️ غير GITHUB_TOKEN في الكود وضع توكنك');
-  }
+// ============ بدء ============
+document.addEventListener('DOMContentLoaded', ()=>{
+  console.log('🚀 بازارك - متصل بـ GitHub: cheikh-dz/Bazark');
+  document.getElementById('fabBtn').style.display='flex';
+  updateImagePreview(); loadHomeProducts();
 });
 </script>
 </body>
